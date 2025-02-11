@@ -6,6 +6,9 @@ print("starting the dnn file transformer")
 session_1_labels = pd.read_csv('data/session_1/labels.csv', skiprows = [1,2]) # <--- this is called a dataframe
 session_1_values = pd.read_csv('data/session_1/values.csv', skiprows = [1,2]) # <--- this is called a dataframe
 
+session_2_labels = pd.read_csv('data/session_2/labels.csv', skiprows = [1,2]) # <--- this is called a dataframe
+session_2_values = pd.read_csv('data/session_2/values.csv', skiprows = [1,2]) # <--- this is called a dataframe
+
 # print a preview of the dataframe
 print(session_1_labels)
 print(session_1_values)
