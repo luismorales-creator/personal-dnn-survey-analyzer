@@ -66,22 +66,31 @@ session1_combined = pd.merge(session_1_labels, session_1_values, on="ResponseId"
 # Remove columns that contain only null values
 session1_combined_cleaned = session1_combined.dropna(axis=1, how="all")
 
-# Preserve metadata (all non-survey categorical data)
+# Preserve all non-survey categorical data
 metadata_columns = ["ResponseId"]  # Start with ResponseId as essential metadata
 non_survey_categorical_columns = [col for col in session1_combined_cleaned.columns
-                                  if not any(col.startswith(prefix) for prefix in ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_"])
-                                  and session1_combined_cleaned[col].dtype == "object"]
+                                  if not any(col.startswith(prefix) for prefix in ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Movement Familiarity_"])
+                                  and session1_combined_cleaned[col].dtype == "object"]  # Ensures non-numeric survey labels are preserved
+
 
 # Identify survey/assessment numeric columns
-survey_prefixes = ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_"]
+survey_prefixes = ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Movement Familiarity_"]
 survey_numeric_columns = [col for col in session1_combined_cleaned.columns
                           if any(col.startswith(prefix) for prefix in survey_prefixes)
                           and pd.api.types.is_numeric_dtype(session1_combined_cleaned[col])]
 
-# Keep metadata, categorical labels, and numeric responses only
+# # Keep metadata, categorical labels, and numeric responses only
+# session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+
+
+# Preserve original column order
+original_column_order = session1_combined.columns
+
+# Filter the correct columns
 session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
 
-
+# Restore original order, keeping only selected columns
+session1_combined_cleaned = session1_combined_cleaned[[col for col in original_column_order if col in session1_combined_cleaned.columns]]
 
 
 
@@ -307,12 +316,89 @@ session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.cs
         #Depression: 9
         #Emotional Volatility: 14R
 
+
+# Identify all BFI numerical columns dynamically (accounting for '_y' suffix)
+bfi_columns = [col for col in session1_combined_cleaned.columns if col.startswith("BFI_")]
+
+# Convert BFI columns to numeric (force non-numeric values to NaN)
+session1_combined_cleaned[bfi_columns] = session1_combined_cleaned[bfi_columns].apply(pd.to_numeric, errors='coerce')
+
+# Correctly identify reversed BFI items with the `_y` suffix
+bfi_reversed = {
+    "BFI_1_y": "Extraversion", "BFI_3_y": "Conscientiousness", "BFI_7_y": "Agreeableness",
+    "BFI_8_y": "Conscientiousness", "BFI_10_y": "Open-Mindedness", "BFI_14_y": "Negative Emotionality"
+}
+
+# Ensure reversed BFI columns exist before applying reverse scoring
+existing_bfi_reversed = [col for col in bfi_reversed.keys() if col in session1_combined_cleaned.columns]
+
+# Apply reverse scoring safely
+if existing_bfi_reversed:
+    session1_combined_cleaned[existing_bfi_reversed] = session1_combined_cleaned[existing_bfi_reversed].replace({1: 5, 2: 4, 3: 3, 4: 2, 5: 1})
+
+# Compute BFI subscores (now using `_y` format)
+bfi_subscores = {
+    "BFI_Open-Mindedness": ["BFI_5_y", "BFI_10_y", "BFI_15_y"],
+    "BFI_Extraversion": ["BFI_1_y", "BFI_6_y", "BFI_11_y"],
+    "BFI_Conscientiousness": ["BFI_3_y", "BFI_8_y", "BFI_13_y"],
+    "BFI_Agreeableness": ["BFI_2_y", "BFI_7_y", "BFI_12_y"],
+    "BFI_Negative Emotionality": ["BFI_4_y", "BFI_9_y", "BFI_14_y"]
+}
+
+# Ensure only existing columns are used in the computation
+for subscore, cols in bfi_subscores.items():
+    valid_cols = [col for col in cols if col in session1_combined_cleaned.columns]
+    if valid_cols:
+        session1_combined_cleaned[subscore] = session1_combined_cleaned[valid_cols].sum(axis=1, min_count=1)
+
+# Find the last BFI question column dynamically
+bfi_numeric_columns = [col for col in bfi_columns if col in session1_combined_cleaned.columns]
+if bfi_numeric_columns:
+    last_bfi_column_index = max([session1_combined_cleaned.columns.get_loc(col) for col in bfi_numeric_columns]) + 1
+    for subscore in reversed(list(bfi_subscores.keys())):
+        if subscore in session1_combined_cleaned.columns:
+            session1_combined_cleaned.insert(last_bfi_column_index, subscore, session1_combined_cleaned.pop(subscore))
+
+# Overwrite the existing session1 CSV file instead of creating a new one
+session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
+
+
 #Aesthetic Responsiveness Assessment (AReA) (make sure all responses coded 1-5)
-    #aesthetic appreciation (AA), Items 1, 2, 3, 4, 6, 9, 13, 14
-    #intense aesthetic experience (IAE), Items 8, 11, 12, 13
-    #creative behaviour, Items 5, 7, 10
+    #aesthetic appreciation (AA), Items 1, 2, 3, 4, 6, 9, 13, 14 (average)
+    #intense aesthetic experience (IAE), Items 8, 11, 12, 13 (average)
+    #creative behaviour, Items 5, 7, 10 (average)
+    #overall AreA (Overall AReA scores are calculated as the average of all individual items)
         
 
+# Identify AReA columns dynamically
+area_columns = [col for col in session1_combined_cleaned.columns if col.startswith("AReA_")]
+
+# Convert AReA columns to numeric (force non-numeric values to NaN)
+session1_combined_cleaned[area_columns] = session1_combined_cleaned[area_columns].apply(pd.to_numeric, errors='coerce')
+
+# Define subscore items
+area_subscores = {
+    "AReA_AA": [1, 2, 3, 4, 6, 9, 13, 14],
+    "AReA_IAE": [8, 11, 12, 13],
+    "AReA_CB": [5, 7, 10],
+}
+
+# Compute AReA subscores (averages)
+for subscore, items in area_subscores.items():
+    relevant_columns = [f"AReA_{i}_y" for i in items if f"AReA_{i}_y" in session1_combined_cleaned.columns]
+    session1_combined_cleaned[subscore] = session1_combined_cleaned[relevant_columns].mean(axis=1, skipna=True)
+
+# Compute Overall AReA score (average of all AReA items)
+session1_combined_cleaned["AReA_Overall"] = session1_combined_cleaned[area_columns].mean(axis=1, skipna=True)
+
+# Dynamically find last AReA column location
+if area_columns and "AReA_Overall" in session1_combined_cleaned.columns:
+    last_area_column = max([session1_combined_cleaned.columns.get_loc(col) for col in area_columns]) + 1
+    for col in ["AReA_AA", "AReA_IAE", "AReA_CB", "AReA_Overall"]:
+        session1_combined_cleaned.insert(last_area_column, col, session1_combined_cleaned.pop(col))
+
+# Overwrite the existing session1 CSV file
+session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
 
 
 #Fixes and exceptions (future section maybe input response id)
