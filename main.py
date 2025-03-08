@@ -9,13 +9,33 @@ pd.set_option('display.max_rows', None)
 
 print("starting the dnn file transformer")
 
-# Function to rename columns based on prefixes
-def rename_columns(df):
+# # Function to rename columns based on prefixes
+# def rename_columns(df):
    
     
+#     new_columns = {}
+#     for col in df.columns:
+#         if re.match(r"^Q9_\d+", col):
+#             new_columns[col] = col.replace("Q9_", "PANAS_")
+#         elif re.match(r"^Q24_\d+", col):
+#             new_columns[col] = col.replace("Q24_", "BFI_")
+#         elif re.match(r"^Q25_\d+", col):
+#             new_columns[col] = col.replace("Q25_", "AReA_")
+#         elif re.match(r"^Q27_\d+", col):
+#             new_columns[col] = col.replace("Q27_", "Movement Familiarity_")
+
+
+#     renamed_df = df.rename(columns=new_columns)
+    
+
+#     return renamed_df
+
+
+def rename_columns(df, session):
     new_columns = {}
     for col in df.columns:
-        if re.match(r"^Q9_\d+", col):
+        # Only rename Q9_ columns in Session 2, but leave them untouched in Session 1
+        if session == 2 and re.match(r"^Q9_\d+", col):
             new_columns[col] = col.replace("Q9_", "PANAS_")
         elif re.match(r"^Q24_\d+", col):
             new_columns[col] = col.replace("Q24_", "BFI_")
@@ -23,12 +43,12 @@ def rename_columns(df):
             new_columns[col] = col.replace("Q25_", "AReA_")
         elif re.match(r"^Q27_\d+", col):
             new_columns[col] = col.replace("Q27_", "Movement Familiarity_")
+    return df.rename(columns=new_columns)
 
 
-    renamed_df = df.rename(columns=new_columns)
-    
 
-    return renamed_df
+
+
 
 # Read CSV files for Session 1
 session_1_labels = pd.read_csv('data/session_1/labels.csv', skiprows=[1, 2])
@@ -38,33 +58,72 @@ session_1_values = pd.read_csv('data/session_1/values.csv', skiprows=[1, 2])
 session_2_labels = pd.read_csv('data/session_2/labels.csv', skiprows=[1, 2])
 session_2_values = pd.read_csv('data/session_2/values.csv', skiprows=[1, 2])
 
-# Ensure both dataframes contain "ResponseId"
-if "ResponseId" not in session_1_labels.columns or "ResponseId" not in session_1_values.columns:
-    print("Error: 'ResponseId' missing in Session 1 files")
-    exit()
-
-if "ResponseId" not in session_2_labels.columns or "ResponseId" not in session_2_values.columns:
-    print("Error: 'ResponseId' missing in Session 2 files")
-    exit()
-
-# Apply renaming function
-
-session_1_labels = rename_columns(session_1_labels)
-session_1_values = rename_columns(session_1_values)
 
 
-session_2_labels = rename_columns(session_2_labels)
-session_2_values = rename_columns(session_2_values)
+
+
+# # Ensure both dataframes contain "ResponseId"
+# if "ResponseId" not in session_1_labels.columns or "ResponseId" not in session_1_values.columns:
+#     print("Error: 'ResponseId' missing in Session 1 files")
+#     exit()
+
+# if "ResponseId" not in session_2_labels.columns or "ResponseId" not in session_2_values.columns:
+#     print("Error: 'ResponseId' missing in Session 2 files")
+#     exit()
+
+
+
+
+# # Apply renaming function
+
+# session_1_labels = rename_columns(session_1_labels)
+# session_1_values = rename_columns(session_1_values)
+
+
+# session_2_labels = rename_columns(session_2_labels)
+# session_2_values = rename_columns(session_2_values)
+
+
+session_1_labels = rename_columns(session_1_labels, session=1)  # Leave PANAS names as is
+session_1_values = rename_columns(session_1_values, session=1)  # Leave PANAS names as is
+
+session_2_labels = rename_columns(session_2_labels, session=2)  # Rename Q9_ to PANAS_
+session_2_values = rename_columns(session_2_values, session=2)  # Rename Q9_ to PANAS_
+
+
 
 
 # Merge Session 1 labels and values
 session1_combined = pd.merge(session_1_labels, session_1_values, on="ResponseId", how="inner")
 
+# Rename columns before any filtering to ensure PANAS is correctly labeled
+session1_combined = rename_columns(session1_combined, session=1)
+
+# Strip all column names of leading/trailing spaces
+session1_combined.columns = session1_combined.columns.str.strip()
+
+# Only replace internal spaces for PANAS columns
+session1_combined.rename(columns=lambda x: x.replace("PANAS ", "PANAS_") if x.startswith("PANAS ") else x, inplace=True)
+
+
+
+
+
+
+
+
+# Ensure PANAS columns are numeric before filtering
+panas_columns_s1 = [col for col in session1_combined.columns if col.startswith("PANAS_")]
+session1_combined[panas_columns_s1] = session1_combined[panas_columns_s1].apply(pd.to_numeric, errors='coerce')
 
 
 
 # Remove columns that contain only null values
 session1_combined_cleaned = session1_combined.dropna(axis=1, how="all")
+
+#Define survey prefixes
+survey_prefixes = ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Movement Familiarity_"]
+
 
 # Preserve all non-survey categorical data
 metadata_columns = ["ResponseId"]  # Start with ResponseId as essential metadata
@@ -73,14 +132,39 @@ non_survey_categorical_columns = [col for col in session1_combined_cleaned.colum
                                   and session1_combined_cleaned[col].dtype == "object"]  # Ensures non-numeric survey labels are preserved
 
 
-# Identify survey/assessment numeric columns
-survey_prefixes = ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Movement Familiarity_"]
+
+
+
+# # Identify survey/assessment numeric columns
+
+# survey_numeric_columns = [col for col in session1_combined_cleaned.columns
+#                           if any(col.startswith(prefix) for prefix in survey_prefixes)
+#                           and pd.api.types.is_numeric_dtype(session1_combined_cleaned[col])]
+
+
+# Ensure PANAS columns are numeric before filtering
+panas_columns_s1 = [col for col in session1_combined_cleaned.columns if col.startswith("PANAS_")]
+# session1_combined_cleaned[panas_columns_s1] = session1_combined_cleaned[panas_columns_s1].apply(pd.to_numeric, errors='coerce')
+session1_combined_cleaned.loc[:, panas_columns_s1] = session1_combined_cleaned[panas_columns_s1].apply(pd.to_numeric, errors='coerce') #<--- trying .loc operation
+#to fix settingwithcopywarning
+#This warning occurs when modifying a slice of a DataFrame instead of the original. To fix it, explicitly use .loc
+#.loc[:, col] ensures Pandas modifies the actual DataFrame rather than a view, avoiding the ambiguous behavior that triggers the warning
+
+# Identify survey/assessment numeric columns (AFTER ensuring PANAS is numeric)
 survey_numeric_columns = [col for col in session1_combined_cleaned.columns
                           if any(col.startswith(prefix) for prefix in survey_prefixes)
                           and pd.api.types.is_numeric_dtype(session1_combined_cleaned[col])]
 
-# # Keep metadata, categorical labels, and numeric responses only
-# session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+
+
+
+
+# Keep metadata, categorical labels, and numeric responses only
+session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+
+
+
+
 
 
 # Preserve original column order
@@ -97,16 +181,23 @@ session1_combined_cleaned = session1_combined_cleaned[[col for col in original_c
 
 
 
-# Rename again after merging (if needed)
-session1_combined_cleaned = rename_columns(session1_combined_cleaned)
+# # Rename again after merging (if needed)
+# session1_combined_cleaned = rename_columns(session1_combined_cleaned)
 
 # Save the cleaned dataframe for Session 1
 session1_output_filename = "session1_combined_with_null_columns_removed.csv"
 session1_combined_cleaned.to_csv(session1_output_filename, index=False)
-print(f"Session 1 file saved as {session1_output_filename}")
+
 
 # Merge Session 2 labels and values
 session2_combined = pd.merge(session_2_labels, session_2_values, on="ResponseId", how="inner")
+
+#Adding session argument
+
+
+session2_combined = rename_columns(session2_combined, session=2)
+
+
 
 # Remove columns that contain only null values
 session2_combined_cleaned = session2_combined.dropna(axis=1, how="all")
@@ -137,6 +228,9 @@ if "StartDate" in session2_combined_cleaned.columns:
 
 # Overwrite the existing session2 CSV file instead of creating a new one
 session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.csv", index=False)
+
+
+
 
 
 
@@ -258,24 +352,33 @@ session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.cs
 #Negative affect: questions 2, 4, 6, 7, 8, 11, 13, 15, 18, & 20 
 
 
-
-# Identify all PANAS columns dynamically for Session 1
+# Identify all PANAS columns dynamically for both sessions
 panas_columns_s1 = [col for col in session1_combined_cleaned.columns if col.startswith("PANAS_")]
+panas_columns_s2 = [col for col in session2_combined_cleaned.columns if col.startswith("PANAS_")]
 
-# Convert PANAS columns to numeric (force non-numeric values to NaN) for Session 1
+# Convert PANAS columns to numeric (force non-numeric values to NaN) for both sessions
 session1_combined_cleaned[panas_columns_s1] = session1_combined_cleaned[panas_columns_s1].apply(pd.to_numeric, errors='coerce')
+session2_combined_cleaned[panas_columns_s2] = session2_combined_cleaned[panas_columns_s2].apply(pd.to_numeric, errors='coerce')
 
-# Define PANAS Positive & Negative Affect columns
+# Define PANAS Positive & Negative Affect columns for Session 1
 panas_positive_s1 = [col for col in panas_columns_s1 if any(str(i) in col for i in [1, 3, 5, 9, 10, 12, 14, 16, 17, 19])]
 panas_negative_s1 = [col for col in panas_columns_s1 if any(str(i) in col for i in [2, 4, 6, 7, 8, 11, 13, 15, 18, 20])]
 
-# Compute total PANAS Positive score for Session 1
+# Define PANAS Positive & Negative Affect columns for Session 2
+panas_positive_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [1, 3, 5, 9, 10, 12, 14, 16, 17, 19])]
+panas_negative_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [2, 4, 6, 7, 8, 11, 13, 15, 18, 20])]
+
+# Compute total PANAS Positive & Negative scores for Session 1
 if panas_positive_s1:
     session1_combined_cleaned["PANAS Positive Total"] = session1_combined_cleaned[panas_positive_s1].sum(axis=1, min_count=1)
-
-# Compute total PANAS Negative score for Session 1
 if panas_negative_s1:
     session1_combined_cleaned["PANAS Negative Total"] = session1_combined_cleaned[panas_negative_s1].sum(axis=1, min_count=1)
+
+# Compute total PANAS Positive & Negative scores for Session 2
+if panas_positive_s2:
+    session2_combined_cleaned["PANAS Positive Total"] = session2_combined_cleaned[panas_positive_s2].sum(axis=1, min_count=1)
+if panas_negative_s2:
+    session2_combined_cleaned["PANAS Negative Total"] = session2_combined_cleaned[panas_negative_s2].sum(axis=1, min_count=1)
 
 # Insert PANAS Total columns **after the last PANAS column** in Session 1
 if panas_columns_s1:
@@ -285,8 +388,20 @@ if panas_columns_s1:
     if "PANAS Negative Total" in session1_combined_cleaned.columns:
         session1_combined_cleaned.insert(last_panas_column_s1 + 1, "PANAS Negative Total", session1_combined_cleaned.pop("PANAS Negative Total"))
 
-# Overwrite the existing session1 CSV file instead of creating a new one
+# Insert PANAS Total columns **after the last PANAS column** in Session 2
+if panas_columns_s2:
+    last_panas_column_s2 = max([session2_combined_cleaned.columns.get_loc(col) for col in panas_columns_s2]) + 1
+    if "PANAS Positive Total" in session2_combined_cleaned.columns:
+        session2_combined_cleaned.insert(last_panas_column_s2, "PANAS Positive Total", session2_combined_cleaned.pop("PANAS Positive Total"))
+    if "PANAS Negative Total" in session2_combined_cleaned.columns:
+        session2_combined_cleaned.insert(last_panas_column_s2 + 1, "PANAS Negative Total", session2_combined_cleaned.pop("PANAS Negative Total"))
+
+# Overwrite the existing session1 & session2 CSV files instead of creating new ones
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
+session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.csv", index=False)
+
+
+
 
 
 #BFI, the extra short version
@@ -323,7 +438,7 @@ bfi_columns = [col for col in session1_combined_cleaned.columns if col.startswit
 # Convert BFI columns to numeric (force non-numeric values to NaN)
 session1_combined_cleaned[bfi_columns] = session1_combined_cleaned[bfi_columns].apply(pd.to_numeric, errors='coerce')
 
-# Correctly identify reversed BFI items with the `_y` suffix
+# Correctly identify reversed BFI items with the _y suffix
 bfi_reversed = {
     "BFI_1_y": "Extraversion", "BFI_3_y": "Conscientiousness", "BFI_7_y": "Agreeableness",
     "BFI_8_y": "Conscientiousness", "BFI_10_y": "Open-Mindedness", "BFI_14_y": "Negative Emotionality"
@@ -336,7 +451,7 @@ existing_bfi_reversed = [col for col in bfi_reversed.keys() if col in session1_c
 if existing_bfi_reversed:
     session1_combined_cleaned[existing_bfi_reversed] = session1_combined_cleaned[existing_bfi_reversed].replace({1: 5, 2: 4, 3: 3, 4: 2, 5: 1})
 
-# Compute BFI subscores (now using `_y` format)
+# Compute BFI subscores (now using _y format)
 bfi_subscores = {
     "BFI_Open-Mindedness": ["BFI_5_y", "BFI_10_y", "BFI_15_y"],
     "BFI_Extraversion": ["BFI_1_y", "BFI_6_y", "BFI_11_y"],
@@ -370,40 +485,88 @@ session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.cs
     #overall AreA (Overall AReA scores are calculated as the average of all individual items)
         
 
-# Identify AReA columns dynamically
+# # Identify AReA columns dynamically
+# area_columns = [col for col in session1_combined_cleaned.columns if col.startswith("AReA_")]
+
+# # Convert AReA columns to numeric (force non-numeric values to NaN)
+# session1_combined_cleaned[area_columns] = session1_combined_cleaned[area_columns].apply(pd.to_numeric, errors='coerce')
+
+# # Define subscore items
+# area_subscores = {
+#     "AReA_AA": [1, 2, 3, 4, 6, 9, 13, 14],
+#     "AReA_IAE": [8, 11, 12, 13],
+#     "AReA_CB": [5, 7, 10],
+# }
+
+# # Compute AReA subscores (averages)
+# for subscore, items in area_subscores.items():
+#     relevant_columns = [f"AReA_{i}_y" for i in items if f"AReA_{i}_y" in session1_combined_cleaned.columns]
+#     session1_combined_cleaned[subscore] = session1_combined_cleaned[relevant_columns].mean(axis=1, skipna=True)
+
+# # Compute Overall AReA score (average of all AReA items)
+# session1_combined_cleaned["AReA_Overall"] = session1_combined_cleaned[area_columns].mean(axis=1, skipna=True)
+
+# # Dynamically find last AReA column location
+# if area_columns and "AReA_Overall" in session1_combined_cleaned.columns:
+#     last_area_column = max([session1_combined_cleaned.columns.get_loc(col) for col in area_columns]) + 1
+#     for col in ["AReA_AA", "AReA_IAE", "AReA_CB", "AReA_Overall"]:
+#         session1_combined_cleaned.insert(last_area_column, col, session1_combined_cleaned.pop(col))
+
+
+#^^^ This old code worked but created a PerformanceWarning (Fragmentation) The new code below fixes this by
+#  batch-inserting columns instead of .insert() multiple times.
+
+
+# Ensure AReA columns exist before computing scores
 area_columns = [col for col in session1_combined_cleaned.columns if col.startswith("AReA_")]
 
-# Convert AReA columns to numeric (force non-numeric values to NaN)
-session1_combined_cleaned[area_columns] = session1_combined_cleaned[area_columns].apply(pd.to_numeric, errors='coerce')
+if area_columns:
+    # Convert AReA columns to numeric (force non-numeric values to NaN) - Fixes `SettingWithCopyWarning`
+    session1_combined_cleaned.loc[:, area_columns] = session1_combined_cleaned.loc[:, area_columns].apply(pd.to_numeric, errors='coerce')
 
-# Define subscore items
-area_subscores = {
-    "AReA_AA": [1, 2, 3, 4, 6, 9, 13, 14],
-    "AReA_IAE": [8, 11, 12, 13],
-    "AReA_CB": [5, 7, 10],
-}
+    # Define subscore items dynamically
+    area_subscores = {
+        "AReA_AA": [col for col in area_columns if any(str(i) in col for i in [1, 2, 3, 4, 6, 9, 13, 14])],
+        "AReA_IAE": [col for col in area_columns if any(str(i) in col for i in [8, 11, 12, 13])],
+        "AReA_CB": [col for col in area_columns if any(str(i) in col for i in [5, 7, 10])]
+    }
 
-# Compute AReA subscores (averages)
-for subscore, items in area_subscores.items():
-    relevant_columns = [f"AReA_{i}_y" for i in items if f"AReA_{i}_y" in session1_combined_cleaned.columns]
-    session1_combined_cleaned[subscore] = session1_combined_cleaned[relevant_columns].mean(axis=1, skipna=True)
+    # Compute subscores using mean
+    subscore_results = {
+        subscore: session1_combined_cleaned[cols].mean(axis=1, skipna=True) 
+        for subscore, cols in area_subscores.items() if cols
+    }
 
-# Compute Overall AReA score (average of all AReA items)
-session1_combined_cleaned["AReA_Overall"] = session1_combined_cleaned[area_columns].mean(axis=1, skipna=True)
+    # Compute Overall AReA score (average of all AReA items)
+    subscore_results["AReA_Overall"] = session1_combined_cleaned[area_columns].mean(axis=1, skipna=True)
 
-# Dynamically find last AReA column location
-if area_columns and "AReA_Overall" in session1_combined_cleaned.columns:
-    last_area_column = max([session1_combined_cleaned.columns.get_loc(col) for col in area_columns]) + 1
-    for col in ["AReA_AA", "AReA_IAE", "AReA_CB", "AReA_Overall"]:
-        session1_combined_cleaned.insert(last_area_column, col, session1_combined_cleaned.pop(col))
+    # # Use `pd.concat()` to add all computed scores at once - Fixes `PerformanceWarning`
+    # session1_combined_cleaned = pd.concat([session1_combined_cleaned, pd.DataFrame(subscore_results)], axis=1) <---that code put the AReA subscores at the end of the csv, not directly after the last AReA question column
+    
+
+    #vvv this code will put the AReA subscores and total scores in the right place
+
+
+# Find the last AReA column index dynamically
+last_area_column_index = max([session1_combined_cleaned.columns.get_loc(col) for col in area_columns]) + 1 if area_columns else len(session1_combined_cleaned.columns)
+
+# Create a DataFrame with computed subscores
+area_subscores_df = pd.DataFrame(subscore_results)
+
+# Insert the AReA subscores and overall score **right after the last AReA column**
+session1_combined_cleaned = pd.concat(
+    [session1_combined_cleaned.iloc[:, :last_area_column_index],  # Keep columns before AReA subscores
+     area_subscores_df,  # Insert computed AReA scores
+     session1_combined_cleaned.iloc[:, last_area_column_index:]  # Append the rest
+    ], axis=1
+)
+
+
+
+
 
 # Overwrite the existing session1 CSV file
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
 
 
 #Fixes and exceptions (future section maybe input response id)
-
-
-
-
-
