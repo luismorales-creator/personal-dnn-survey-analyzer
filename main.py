@@ -25,6 +25,7 @@ print("starting the dnn file transformer")
 #             new_columns[col] = col.replace("Q27_", "Movement Familiarity_")
 
 
+
 #     renamed_df = df.rename(columns=new_columns)
     
 
@@ -43,7 +44,11 @@ def rename_columns(df, session):
             new_columns[col] = col.replace("Q25_", "AReA_")
         elif re.match(r"^Q27_\d+", col):
             new_columns[col] = col.replace("Q27_", "Movement Familiarity_")
+        elif re.match(r"^Q26(\b|_)", col):  # Fix: Matches Q26, Q26_x, Q26_y, etc.
+            new_columns[col] = col.replace("Q26", "Participation Code")  # Keeps _x, _y, etc.
+
     return df.rename(columns=new_columns)
+
 
 
 
@@ -93,8 +98,48 @@ session_2_values = rename_columns(session_2_values, session=2)  # Rename Q9_ to 
 
 
 
+# # Merge Session 1 labels and values
+# session1_combined = pd.merge(session_1_labels, session_1_values, on="ResponseId", how="inner")
+
+
 # Merge Session 1 labels and values
 session1_combined = pd.merge(session_1_labels, session_1_values, on="ResponseId", how="inner")
+
+# Merge Session 1 labels and values
+session1_combined = pd.merge(session_1_labels, session_1_values, on="ResponseId", how="inner")
+
+# Remove duplicate "Participation Code" columns if they exist
+participation_cols_s1 = [col for col in session1_combined.columns if "Participation Code" in col]
+if len(participation_cols_s1) > 1:
+    session1_combined.drop(columns=participation_cols_s1[1:], inplace=True)  # Keep only the first instance
+session1_combined.rename(columns={"Participation Code_x": "Participation Code", "Participation Code_y": "Participation Code"}, inplace=True)
+
+
+
+
+# Keep demographic columns in session1_combined
+demographic_columns = ["Age", "Education", "Gender"]  # These exist in values.csv
+existing_demographics = [col for col in demographic_columns if col in session1_combined.columns]
+
+# Debugging: Check what exists
+print("Demographic columns found in merged file:", existing_demographics)
+
+
+
+######
+
+# Ensure demographic columns exist before filtering
+demographic_columns = ["Age", "Education", "Gender"]
+existing_demographics = [col for col in demographic_columns if col in session1_combined.columns]
+
+# Extract demographic data separately
+session1_demographics = session1_combined[existing_demographics]  # Keep only existing ones
+
+# Debugging: Check what exists
+print("Demographic columns found:", session1_demographics.columns.tolist())  
+
+
+############
 
 # Rename columns before any filtering to ensure PANAS is correctly labeled
 session1_combined = rename_columns(session1_combined, session=1)
@@ -102,10 +147,15 @@ session1_combined = rename_columns(session1_combined, session=1)
 # Strip all column names of leading/trailing spaces
 session1_combined.columns = session1_combined.columns.str.strip()
 
-# Only replace internal spaces for PANAS columns
-session1_combined.rename(columns=lambda x: x.replace("PANAS ", "PANAS_") if x.startswith("PANAS ") else x, inplace=True)
+# # Only replace internal spaces for PANAS columns
+# session1_combined.rename(columns=lambda x: x.replace("PANAS ", "PANAS_") if x.startswith("PANAS ") else x, inplace=True)
 
-
+session1_combined = session1_combined.rename(columns={
+    "Participation Code_x": "Participation Code",
+    "Age": "Age",
+    "Gender": "Gender", 
+    "Education": "Education"
+}).drop(columns=["Participation Code_y"], errors='ignore')
 
 
 
@@ -126,7 +176,13 @@ survey_prefixes = ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Mov
 
 
 # Preserve all non-survey categorical data
-metadata_columns = ["ResponseId"]  # Start with ResponseId as essential metadata
+# Separate demographics from metadata
+
+
+metadata_columns = ["ResponseId"]  # Essential non-demographic metadata
+
+demographic_columns = ["Age", "Education", "Gender"]  # Key demographics
+
 non_survey_categorical_columns = [col for col in session1_combined_cleaned.columns
                                   if not any(col.startswith(prefix) for prefix in ["STAI Trait_", "STAI State_", "PANAS_", "BFI_", "AReA_", "Movement Familiarity_"])
                                   and session1_combined_cleaned[col].dtype == "object"]  # Ensures non-numeric survey labels are preserved
@@ -159,9 +215,20 @@ survey_numeric_columns = [col for col in session1_combined_cleaned.columns
 
 
 
-# Keep metadata, categorical labels, and numeric responses only
-session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+# # Keep metadata, categorical labels, demographics, and numeric responses only
+# # session1_combined_cleaned = session1_combined_cleaned[
+# #     metadata_columns + demographic_columns + non_survey_categorical_columns + survey_numeric_columns
+# ]
 
+
+# # Keep demographics, metadata, categorical labels, and numeric responses
+# session1_combined_cleaned = session1_combined_cleaned[
+#     metadata_columns + non_survey_categorical_columns + survey_numeric_columns + existing_demographics
+# ]
+
+
+# KEEP EVERYTHING (minimal filtering)
+session1_combined_cleaned = session1_combined[session1_combined.columns]
 
 
 
@@ -170,8 +237,12 @@ session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_sur
 # Preserve original column order
 original_column_order = session1_combined.columns
 
-# Filter the correct columns
-session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+# # Filter the correct columns
+# session1_combined_cleaned = session1_combined_cleaned[metadata_columns + non_survey_categorical_columns + survey_numeric_columns]
+
+
+# Instead of filtering specific columns, keep everything
+session1_combined_cleaned = session1_combined_cleaned.copy()
 
 # Restore original order, keeping only selected columns
 session1_combined_cleaned = session1_combined_cleaned[[col for col in original_column_order if col in session1_combined_cleaned.columns]]
@@ -191,6 +262,17 @@ session1_combined_cleaned.to_csv(session1_output_filename, index=False)
 
 # Merge Session 2 labels and values
 session2_combined = pd.merge(session_2_labels, session_2_values, on="ResponseId", how="inner")
+
+
+# Merge Session 2 labels and values
+session2_combined = pd.merge(session_2_labels, session_2_values, on="ResponseId", how="inner")
+
+# Remove duplicate "Participation Code" columns if they exist
+participation_cols_s2 = [col for col in session2_combined.columns if "Participation Code" in col]
+if len(participation_cols_s2) > 1:
+    session2_combined.drop(columns=participation_cols_s2[1:], inplace=True)  # Keep only the first instance
+session2_combined.rename(columns={"Participation Code_x": "Participation Code", "Participation Code_y": "Participation Code"}, inplace=True)
+
 
 #Adding session argument
 
@@ -235,6 +317,9 @@ session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.cs
 
 
 
+
+
+
 #At this point, the code outputs the columns with all the proper titles of the assessments and surveys. 
 # The following task is to compute the total scores and sub-scores for: 
 
@@ -257,12 +342,13 @@ if stai_s_reversed_s1:
 
 # Compute total STAI-S score for Session 1
 if stai_s_columns_s1:
-    session1_combined_cleaned["STAI-S Total"] = session1_combined_cleaned[stai_s_columns_s1].sum(axis=1, min_count=1)
+    session1_combined_cleaned["STAI-S Total_Session1"] = session1_combined_cleaned[stai_s_columns_s1].sum(axis=1, min_count=1)
+
 
 # Insert STAI-S Total column **after the last STAI-S column** in Session 1
-if stai_s_columns_s1 and "STAI-S Total" in session1_combined_cleaned.columns:
+if stai_s_columns_s1 and "STAI-S Total_Session1" in session1_combined_cleaned.columns:
     last_stai_s_column_s1 = max([session1_combined_cleaned.columns.get_loc(col) for col in stai_s_columns_s1]) + 1
-    session1_combined_cleaned.insert(last_stai_s_column_s1, "STAI-S Total", session1_combined_cleaned.pop("STAI-S Total"))
+    session1_combined_cleaned.insert(last_stai_s_column_s1, "STAI-S Total_Session1", session1_combined_cleaned.pop("STAI-S Total_Session1"))
 
 
 # --- Apply same logic for Session 2 ---
@@ -282,17 +368,18 @@ if stai_s_reversed_s2:
 
 # Compute total STAI-S score for Session 2
 if stai_s_columns_s2:
-    session2_combined_cleaned["STAI-S Total"] = session2_combined_cleaned[stai_s_columns_s2].sum(axis=1, min_count=1)
+    session2_combined_cleaned["STAI-S Total_Session2"] = session2_combined_cleaned[stai_s_columns_s2].sum(axis=1, min_count=1)
+
 
 # Insert STAI-S Total column **after the last STAI-S column** in Session 2
-if stai_s_columns_s2 and "STAI-S Total" in session2_combined_cleaned.columns:
-    last_stai_s_column_s2 = max([session2_combined_cleaned.columns.get_loc(col) for col in stai_s_columns_s2]) + 1
-    session2_combined_cleaned.insert(last_stai_s_column_s2, "STAI-S Total", session2_combined_cleaned.pop("STAI-S Total"))
-
+if stai_s_columns_s2 and "STAI-S Total_Session2" in session2_combined_cleaned.columns:
+    last_stai_s_column_s2 = session2_combined_cleaned.columns.get_loc(stai_s_columns_s2[-1]) + 1
+    session2_combined_cleaned.insert(last_stai_s_column_s2, "STAI-S Total_Session2", session2_combined_cleaned.pop("STAI-S Total_Session2"))
 
 # Overwrite the existing session1 & session2 CSV files instead of creating new ones
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
 session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.csv", index=False)
+
 
 
 
@@ -370,31 +457,31 @@ panas_negative_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i 
 
 # Compute total PANAS Positive & Negative scores for Session 1
 if panas_positive_s1:
-    session1_combined_cleaned["PANAS Positive Total"] = session1_combined_cleaned[panas_positive_s1].sum(axis=1, min_count=1)
+    session1_combined_cleaned["PANAS Positive Total_Session1"] = session1_combined_cleaned[panas_positive_s1].sum(axis=1, min_count=1)
 if panas_negative_s1:
-    session1_combined_cleaned["PANAS Negative Total"] = session1_combined_cleaned[panas_negative_s1].sum(axis=1, min_count=1)
+    session1_combined_cleaned["PANAS Negative Total_Session1"] = session1_combined_cleaned[panas_negative_s1].sum(axis=1, min_count=1)
 
 # Compute total PANAS Positive & Negative scores for Session 2
 if panas_positive_s2:
-    session2_combined_cleaned["PANAS Positive Total"] = session2_combined_cleaned[panas_positive_s2].sum(axis=1, min_count=1)
+    session2_combined_cleaned["PANAS Positive Total_Session2"] = session2_combined_cleaned[panas_positive_s2].sum(axis=1, min_count=1)
 if panas_negative_s2:
-    session2_combined_cleaned["PANAS Negative Total"] = session2_combined_cleaned[panas_negative_s2].sum(axis=1, min_count=1)
+    session2_combined_cleaned["PANAS Negative Total_Session2"] = session2_combined_cleaned[panas_negative_s2].sum(axis=1, min_count=1)
 
 # Insert PANAS Total columns **after the last PANAS column** in Session 1
 if panas_columns_s1:
     last_panas_column_s1 = max([session1_combined_cleaned.columns.get_loc(col) for col in panas_columns_s1]) + 1
-    if "PANAS Positive Total" in session1_combined_cleaned.columns:
-        session1_combined_cleaned.insert(last_panas_column_s1, "PANAS Positive Total", session1_combined_cleaned.pop("PANAS Positive Total"))
-    if "PANAS Negative Total" in session1_combined_cleaned.columns:
-        session1_combined_cleaned.insert(last_panas_column_s1 + 1, "PANAS Negative Total", session1_combined_cleaned.pop("PANAS Negative Total"))
+    if "PANAS Positive Total_Session1" in session1_combined_cleaned.columns:
+        session1_combined_cleaned.insert(last_panas_column_s1, "PANAS Positive Total_Session1", session1_combined_cleaned.pop("PANAS Positive Total_Session1"))
+    if "PANAS Negative Total_Session1" in session1_combined_cleaned.columns:
+        session1_combined_cleaned.insert(last_panas_column_s1 + 1, "PANAS Negative Total_Session1", session1_combined_cleaned.pop("PANAS Negative Total_Session1"))
 
 # Insert PANAS Total columns **after the last PANAS column** in Session 2
 if panas_columns_s2:
     last_panas_column_s2 = max([session2_combined_cleaned.columns.get_loc(col) for col in panas_columns_s2]) + 1
-    if "PANAS Positive Total" in session2_combined_cleaned.columns:
-        session2_combined_cleaned.insert(last_panas_column_s2, "PANAS Positive Total", session2_combined_cleaned.pop("PANAS Positive Total"))
-    if "PANAS Negative Total" in session2_combined_cleaned.columns:
-        session2_combined_cleaned.insert(last_panas_column_s2 + 1, "PANAS Negative Total", session2_combined_cleaned.pop("PANAS Negative Total"))
+    if "PANAS Positive Total_Session2" in session2_combined_cleaned.columns:
+        session2_combined_cleaned.insert(last_panas_column_s2, "PANAS Positive Total_Session2", session2_combined_cleaned.pop("PANAS Positive Total_Session2"))
+    if "PANAS Negative Total_Session2" in session2_combined_cleaned.columns:
+        session2_combined_cleaned.insert(last_panas_column_s2 + 1, "PANAS Negative Total_Session2", session2_combined_cleaned.pop("PANAS Negative Total_Session2"))
 
 # Overwrite the existing session1 & session2 CSV files instead of creating new ones
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
@@ -562,11 +649,117 @@ session1_combined_cleaned = pd.concat(
 )
 
 
-
-
-
 # Overwrite the existing session1 CSV file
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
 
 
 #Fixes and exceptions (future section maybe input response id)
+
+
+
+
+#cd /Users/luisemilio/Documents/Code/personal_dnn_surveys
+
+
+
+
+
+# ##### SUMMARY FILE #####
+
+
+
+# # Load cleaned files with explicit session tags
+# session1_df = pd.read_csv("session1_combined_with_null_columns_removed.csv").add_suffix('_S1')
+# session2_df = pd.read_csv("session2_combined_with_null_columns_removed.csv").add_suffix('_S2')
+
+# # Merge with outer join
+# summary_df = pd.merge(
+#     session1_df, 
+#     session2_df, 
+#     left_on="Participation Code_S1", 
+#     right_on="Participation Code_S2", 
+#     how='outer'
+# )
+
+# # Create final columns using .get() for safety
+# column_mapping = {
+#     # Session 1
+#     'Gender_S1': 'Gender',
+#     'Age_S1': 'Age',
+#     'Education_S1': 'Education',
+#     'STAI-T Total_S1': 'STAI-T Total',
+#     'STAI-S Total_Session1_S1': 'STAI-S Total_Session1',
+#     'PANAS Positive Total_Session1_S1': 'PANAS Positive Total_Session1',
+#     'PANAS Negative Total_Session1_S1': 'PANAS Negative Total_Session1',
+#     # Session 2
+#     'STAI-S Total_Session2_S2': 'STAI-S Total_Session2',
+#     'PANAS Positive Total_Session2_S2': 'PANAS Positive Total_Session2',
+#     'PANAS Negative Total_Session2_S2': 'PANAS Negative Total_Session2'
+# }
+
+# for source_col, target_col in column_mapping.items():
+#     summary_df[target_col] = summary_df.get(source_col, pd.NA)
+
+# # Keep BFI/AReA from Session 1 only
+# summary_df = summary_df[[
+#     'Participation Code_S1',
+#     'Gender', 'Age', 'Education',
+#     'STAI-T Total',
+#     'STAI-S Total_Session1', 'STAI-S Total_Session2',
+#     'PANAS Positive Total_Session1', 'PANAS Positive Total_Session2',
+#     'PANAS Negative Total_Session1', 'PANAS Negative Total_Session2',
+#     *[col for col in session1_df.columns if col.startswith('BFI_')],
+#     *[col for col in session1_df.columns if col.startswith('AReA_')]
+# ]]
+
+# # Final renaming
+# summary_df = summary_df.rename(columns={
+#     'Participation Code_S1': 'Participation Code',
+#     **{col: col.replace('_S1', '') for col in summary_df.columns if '_S1' in col}
+# })
+
+# summary_df.to_csv("summary_file.csv", index=False)
+# print("Summary created with columns:", summary_df.columns.tolist())
+
+
+
+##### SUMMARY FILE #####
+
+
+
+# Load the cleaned session files
+session1_df = pd.read_csv("session1_combined_with_null_columns_removed.csv")
+session2_df = pd.read_csv("session2_combined_with_null_columns_removed.csv")
+
+# Ensure Participation Code is merged correctly
+session1_df.rename(columns={"Participation Code_x": "Participation Code", "Participation Code_y": "Participation Code"}, inplace=True)
+session2_df.rename(columns={"Participation Code_x": "Participation Code", "Participation Code_y": "Participation Code"}, inplace=True)
+
+# Define final summary columns (dropping `_y` suffix for clarity)
+summary_columns = [
+    "Participation Code",
+    "Gender", "Age", "Education",  # Keep demographic variables clean
+    "STAI-T Total",  
+    "STAI-S Total_Session1", "STAI-S Total_Session2",  
+    "PANAS Positive Total_Session1", "PANAS Positive Total_Session2", 
+    "PANAS Negative Total_Session1", "PANAS Negative Total_Session2", 
+    "BFI_Open-Mindedness", "BFI_Extraversion", "BFI_Conscientiousness", 
+    "BFI_Agreeableness", "BFI_Negative Emotionality",  
+    "AReA_AA", "AReA_IAE", "AReA_CB", "AReA_Overall",
+    "Movement Familiarity_1", "Movement Familiarity_2", "Movement Familiarity_3",
+    "Movement Familiarity_4", "Movement Familiarity_5"
+]
+
+# Merge sessions on Participation Code (outer join to keep all participants)
+summary_df = pd.merge(session1_df, session2_df, on="Participation Code", how="outer")
+
+# Drop `_y` suffix from columns like Gender, Education, Age, and Movement Familiarity
+summary_df = summary_df.rename(columns=lambda x: x.rstrip("_y") if x.endswith("_y") else x)
+
+# Keep only the desired summary columns
+summary_df = summary_df[[col for col in summary_columns if col in summary_df.columns]]
+
+# Save final summary file
+summary_df.to_csv("summary_file.csv", index=False)
+
+print("Summary File Created Successfully!")
