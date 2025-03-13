@@ -121,8 +121,7 @@ session1_combined.rename(columns={"Participation Code_x": "Participation Code", 
 demographic_columns = ["Age", "Education", "Gender"]  # These exist in values.csv
 existing_demographics = [col for col in demographic_columns if col in session1_combined.columns]
 
-# Debugging: Check what exists
-print("Demographic columns found in merged file:", existing_demographics)
+
 
 
 
@@ -135,8 +134,7 @@ existing_demographics = [col for col in demographic_columns if col in session1_c
 # Extract demographic data separately
 session1_demographics = session1_combined[existing_demographics]  # Keep only existing ones
 
-# Debugging: Check what exists
-print("Demographic columns found:", session1_demographics.columns.tolist())  
+
 
 
 ############
@@ -316,10 +314,6 @@ session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.cs
 
 
 
-
-
-
-
 #At this point, the code outputs the columns with all the proper titles of the assessments and surveys. 
 # The following task is to compute the total scores and sub-scores for: 
 
@@ -395,23 +389,35 @@ session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.cs
 stai_t_columns = [col for col in session1_combined_cleaned.columns if col.startswith("STAI Trait_")]
 
 # 2. Convert STAI-T columns to numeric (force non-numeric values to NaN)
-session1_combined_cleaned[stai_t_columns] = session1_combined_cleaned[stai_t_columns].apply(pd.to_numeric, errors='coerce')
+session1_combined_cleaned.loc[:, stai_t_columns] = session1_combined_cleaned[stai_t_columns].apply(pd.to_numeric, errors='coerce')
 
 # 3. Identify reversed STAI-T items dynamically (filter only numeric ones)
 stai_t_reversed = [col for col in stai_t_columns if any(str(i) in col for i in [1, 3, 6, 7, 10, 13, 14, 16, 19])]
 
 # 4. Apply reverse scoring safely
 if stai_t_reversed:
-    session1_combined_cleaned[stai_t_reversed] = session1_combined_cleaned[stai_t_reversed].replace({1: 4, 2: 3, 3: 2, 4: 1})
+    session1_combined_cleaned.loc[:, stai_t_reversed] = session1_combined_cleaned[stai_t_reversed].replace({1: 4, 2: 3, 3: 2, 4: 1})
 
 # 5. Compute total STAI-T score (sum of all valid STAI-T items)
+stai_t_total = None
 if stai_t_columns:
-    session1_combined_cleaned["STAI-T Total"] = session1_combined_cleaned[stai_t_columns].sum(axis=1, min_count=1)
+    stai_t_total = session1_combined_cleaned[stai_t_columns].sum(axis=1, min_count=1)
 
-# 6. Dynamically find the last STAI-T column among numerical columns
-if stai_t_columns and "STAI-T Total" in session1_combined_cleaned.columns:
-    last_stai_column = max([session1_combined_cleaned.columns.get_loc(col) for col in stai_t_columns]) + 1
-    session1_combined_cleaned.insert(last_stai_column, "STAI-T Total", session1_combined_cleaned.pop("STAI-T Total"))
+# 6. Find the last STAI-T column position
+last_stai_column = max([session1_combined_cleaned.columns.get_loc(col) for col in stai_t_columns]) + 1 if stai_t_columns else 0
+
+# 7. Create a new DataFrame with the STAI-T Total column
+if stai_t_total is not None:
+    # Create a DataFrame with the total score
+    stai_t_df = pd.DataFrame({"STAI-T Total": stai_t_total})
+    
+    # Insert the STAI-T Total column at the right position using concat
+    session1_combined_cleaned = pd.concat(
+        [session1_combined_cleaned.iloc[:, :last_stai_column],  # Columns before STAI-T Total
+         stai_t_df,  # STAI-T Total column
+         session1_combined_cleaned.iloc[:, last_stai_column:]],  # Columns after STAI-T Total
+        axis=1
+    )
 
 # Ensure StartDate column exists before sorting
 if "StartDate" in session1_combined_cleaned.columns:
@@ -439,21 +445,29 @@ session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.cs
 #Negative affect: questions 2, 4, 6, 7, 8, 11, 13, 15, 18, & 20 
 
 
-# Identify all PANAS columns dynamically for both sessions
+# Check for PANAS columns in session 1 - handle both formats (with and without space)
 panas_columns_s1 = [col for col in session1_combined_cleaned.columns if col.startswith("PANAS_")]
-panas_columns_s2 = [col for col in session2_combined_cleaned.columns if col.startswith("PANAS_")]
 
-# Convert PANAS columns to numeric (force non-numeric values to NaN) for both sessions
-session1_combined_cleaned[panas_columns_s1] = session1_combined_cleaned[panas_columns_s1].apply(pd.to_numeric, errors='coerce')
-session2_combined_cleaned[panas_columns_s2] = session2_combined_cleaned[panas_columns_s2].apply(pd.to_numeric, errors='coerce')
+# If no columns with "PANAS_" format are found, check for "PANAS " format and rename them
+if not panas_columns_s1:
+    panas_space_columns = [col for col in session1_combined_cleaned.columns if col.startswith("PANAS ")]
+    if panas_space_columns:
+        # Create a rename dictionary to convert "PANAS " to "PANAS_"
+        rename_dict = {col: col.replace("PANAS ", "PANAS_") for col in panas_space_columns}
+        session1_combined_cleaned = session1_combined_cleaned.rename(columns=rename_dict)
+        # Update the list of PANAS columns after renaming
+        panas_columns_s1 = [col for col in session1_combined_cleaned.columns if col.startswith("PANAS_")]
+        print(f"Renamed {len(panas_space_columns)} PANAS columns to consistent format")
+
+# Convert PANAS columns to numeric (force non-numeric values to NaN) for session 1 
+if panas_columns_s1:
+    session1_combined_cleaned[panas_columns_s1] = session1_combined_cleaned[panas_columns_s1].apply(pd.to_numeric, errors='coerce')
 
 # Define PANAS Positive & Negative Affect columns for Session 1
 panas_positive_s1 = [col for col in panas_columns_s1 if any(str(i) in col for i in [1, 3, 5, 9, 10, 12, 14, 16, 17, 19])]
 panas_negative_s1 = [col for col in panas_columns_s1 if any(str(i) in col for i in [2, 4, 6, 7, 8, 11, 13, 15, 18, 20])]
 
-# Define PANAS Positive & Negative Affect columns for Session 2
-panas_positive_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [1, 3, 5, 9, 10, 12, 14, 16, 17, 19])]
-panas_negative_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [2, 4, 6, 7, 8, 11, 13, 15, 18, 20])]
+
 
 # Compute total PANAS Positive & Negative scores for Session 1
 if panas_positive_s1:
@@ -461,11 +475,6 @@ if panas_positive_s1:
 if panas_negative_s1:
     session1_combined_cleaned["PANAS Negative Total_Session1"] = session1_combined_cleaned[panas_negative_s1].sum(axis=1, min_count=1)
 
-# Compute total PANAS Positive & Negative scores for Session 2
-if panas_positive_s2:
-    session2_combined_cleaned["PANAS Positive Total_Session2"] = session2_combined_cleaned[panas_positive_s2].sum(axis=1, min_count=1)
-if panas_negative_s2:
-    session2_combined_cleaned["PANAS Negative Total_Session2"] = session2_combined_cleaned[panas_negative_s2].sum(axis=1, min_count=1)
 
 # Insert PANAS Total columns **after the last PANAS column** in Session 1
 if panas_columns_s1:
@@ -475,6 +484,33 @@ if panas_columns_s1:
     if "PANAS Negative Total_Session1" in session1_combined_cleaned.columns:
         session1_combined_cleaned.insert(last_panas_column_s1 + 1, "PANAS Negative Total_Session1", session1_combined_cleaned.pop("PANAS Negative Total_Session1"))
 
+
+# Overwrite the existing session1 CSV files 
+
+session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
+
+
+
+
+# Identify all PANAS columns dynamically for session 2
+panas_columns_s2 = [col for col in session2_combined_cleaned.columns if col.startswith("PANAS_")]
+
+# Convert PANAS columns to numeric (force non-numeric values to NaN) for session 1 
+
+session2_combined_cleaned[panas_columns_s2] = session2_combined_cleaned[panas_columns_s2].apply(pd.to_numeric, errors='coerce')
+
+# Define PANAS Positive & Negative Affect columns for Session 2
+panas_positive_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [1, 3, 5, 9, 10, 12, 14, 16, 17, 19])]
+panas_negative_s2 = [col for col in panas_columns_s2 if any(str(i) in col for i in [2, 4, 6, 7, 8, 11, 13, 15, 18, 20])]
+
+# Compute total PANAS Positive & Negative scores for Session 2
+if panas_positive_s2:
+    session2_combined_cleaned["PANAS Positive Total_Session2"] = session2_combined_cleaned[panas_positive_s2].sum(axis=1, min_count=1)
+if panas_negative_s2:
+    session2_combined_cleaned["PANAS Negative Total_Session2"] = session2_combined_cleaned[panas_negative_s2].sum(axis=1, min_count=1)
+
+
+
 # Insert PANAS Total columns **after the last PANAS column** in Session 2
 if panas_columns_s2:
     last_panas_column_s2 = max([session2_combined_cleaned.columns.get_loc(col) for col in panas_columns_s2]) + 1
@@ -483,8 +519,11 @@ if panas_columns_s2:
     if "PANAS Negative Total_Session2" in session2_combined_cleaned.columns:
         session2_combined_cleaned.insert(last_panas_column_s2 + 1, "PANAS Negative Total_Session2", session2_combined_cleaned.pop("PANAS Negative Total_Session2"))
 
-# Overwrite the existing session1 & session2 CSV files instead of creating new ones
-session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
+
+
+
+# Overwrite the existing session2 CSV files 
+
 session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.csv", index=False)
 
 
@@ -522,8 +561,8 @@ session2_combined_cleaned.to_csv("session2_combined_with_null_columns_removed.cs
 # Identify all BFI numerical columns dynamically (accounting for '_y' suffix)
 bfi_columns = [col for col in session1_combined_cleaned.columns if col.startswith("BFI_")]
 
-# Convert BFI columns to numeric (force non-numeric values to NaN)
-session1_combined_cleaned[bfi_columns] = session1_combined_cleaned[bfi_columns].apply(pd.to_numeric, errors='coerce')
+# Convert BFI columns to numeric (force non-numeric values to NaN) - Using .loc to avoid SettingWithCopyWarning
+session1_combined_cleaned.loc[:, bfi_columns] = session1_combined_cleaned[bfi_columns].apply(pd.to_numeric, errors='coerce')
 
 # Correctly identify reversed BFI items with the _y suffix
 bfi_reversed = {
@@ -534,9 +573,9 @@ bfi_reversed = {
 # Ensure reversed BFI columns exist before applying reverse scoring
 existing_bfi_reversed = [col for col in bfi_reversed.keys() if col in session1_combined_cleaned.columns]
 
-# Apply reverse scoring safely
+# Apply reverse scoring safely - Using .loc to avoid SettingWithCopyWarning
 if existing_bfi_reversed:
-    session1_combined_cleaned[existing_bfi_reversed] = session1_combined_cleaned[existing_bfi_reversed].replace({1: 5, 2: 4, 3: 3, 4: 2, 5: 1})
+    session1_combined_cleaned.loc[:, existing_bfi_reversed] = session1_combined_cleaned[existing_bfi_reversed].replace({1: 5, 2: 4, 3: 3, 4: 2, 5: 1})
 
 # Compute BFI subscores (now using _y format)
 bfi_subscores = {
@@ -547,19 +586,29 @@ bfi_subscores = {
     "BFI_Negative Emotionality": ["BFI_4_y", "BFI_9_y", "BFI_14_y"]
 }
 
-# Ensure only existing columns are used in the computation
+# Calculate all BFI subscores at once
+subscore_results = {}
 for subscore, cols in bfi_subscores.items():
     valid_cols = [col for col in cols if col in session1_combined_cleaned.columns]
     if valid_cols:
-        session1_combined_cleaned[subscore] = session1_combined_cleaned[valid_cols].sum(axis=1, min_count=1)
+        subscore_results[subscore] = session1_combined_cleaned[valid_cols].sum(axis=1, min_count=1)
 
 # Find the last BFI question column dynamically
 bfi_numeric_columns = [col for col in bfi_columns if col in session1_combined_cleaned.columns]
-if bfi_numeric_columns:
+if bfi_numeric_columns and subscore_results:
+    # Find position to insert subscores
     last_bfi_column_index = max([session1_combined_cleaned.columns.get_loc(col) for col in bfi_numeric_columns]) + 1
-    for subscore in reversed(list(bfi_subscores.keys())):
-        if subscore in session1_combined_cleaned.columns:
-            session1_combined_cleaned.insert(last_bfi_column_index, subscore, session1_combined_cleaned.pop(subscore))
+    
+    # Create DataFrame with all subscores
+    bfi_subscores_df = pd.DataFrame(subscore_results)
+    
+    # Insert all BFI subscores at once using concat (prevents fragmentation)
+    session1_combined_cleaned = pd.concat(
+        [session1_combined_cleaned.iloc[:, :last_bfi_column_index],  # Columns before BFI subscores
+         bfi_subscores_df,  # BFI subscore columns
+         session1_combined_cleaned.iloc[:, last_bfi_column_index:]],  # Columns after BFI subscores
+        axis=1
+    )
 
 # Overwrite the existing session1 CSV file instead of creating a new one
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
@@ -653,73 +702,7 @@ session1_combined_cleaned = pd.concat(
 session1_combined_cleaned.to_csv("session1_combined_with_null_columns_removed.csv", index=False)
 
 
-#Fixes and exceptions (future section maybe input response id)
 
-
-
-
-#cd /Users/luisemilio/Documents/Code/personal_dnn_surveys
-
-
-
-
-
-# ##### SUMMARY FILE #####
-
-
-
-# # Load cleaned files with explicit session tags
-# session1_df = pd.read_csv("session1_combined_with_null_columns_removed.csv").add_suffix('_S1')
-# session2_df = pd.read_csv("session2_combined_with_null_columns_removed.csv").add_suffix('_S2')
-
-# # Merge with outer join
-# summary_df = pd.merge(
-#     session1_df, 
-#     session2_df, 
-#     left_on="Participation Code_S1", 
-#     right_on="Participation Code_S2", 
-#     how='outer'
-# )
-
-# # Create final columns using .get() for safety
-# column_mapping = {
-#     # Session 1
-#     'Gender_S1': 'Gender',
-#     'Age_S1': 'Age',
-#     'Education_S1': 'Education',
-#     'STAI-T Total_S1': 'STAI-T Total',
-#     'STAI-S Total_Session1_S1': 'STAI-S Total_Session1',
-#     'PANAS Positive Total_Session1_S1': 'PANAS Positive Total_Session1',
-#     'PANAS Negative Total_Session1_S1': 'PANAS Negative Total_Session1',
-#     # Session 2
-#     'STAI-S Total_Session2_S2': 'STAI-S Total_Session2',
-#     'PANAS Positive Total_Session2_S2': 'PANAS Positive Total_Session2',
-#     'PANAS Negative Total_Session2_S2': 'PANAS Negative Total_Session2'
-# }
-
-# for source_col, target_col in column_mapping.items():
-#     summary_df[target_col] = summary_df.get(source_col, pd.NA)
-
-# # Keep BFI/AReA from Session 1 only
-# summary_df = summary_df[[
-#     'Participation Code_S1',
-#     'Gender', 'Age', 'Education',
-#     'STAI-T Total',
-#     'STAI-S Total_Session1', 'STAI-S Total_Session2',
-#     'PANAS Positive Total_Session1', 'PANAS Positive Total_Session2',
-#     'PANAS Negative Total_Session1', 'PANAS Negative Total_Session2',
-#     *[col for col in session1_df.columns if col.startswith('BFI_')],
-#     *[col for col in session1_df.columns if col.startswith('AReA_')]
-# ]]
-
-# # Final renaming
-# summary_df = summary_df.rename(columns={
-#     'Participation Code_S1': 'Participation Code',
-#     **{col: col.replace('_S1', '') for col in summary_df.columns if '_S1' in col}
-# })
-
-# summary_df.to_csv("summary_file.csv", index=False)
-# print("Summary created with columns:", summary_df.columns.tolist())
 
 
 
@@ -762,4 +745,14 @@ summary_df = summary_df[[col for col in summary_columns if col in summary_df.col
 # Save final summary file
 summary_df.to_csv("summary_file.csv", index=False)
 
-print("Summary File Created Successfully!")
+
+
+#Fixes and exceptions (future section maybe input response id)
+
+
+
+
+#cd /Users/luisemilio/Documents/Code/personal_dnn_surveys
+
+
+# participants missing session 2 surveys: 13, 15, 16, 25
