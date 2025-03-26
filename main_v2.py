@@ -1,4 +1,3 @@
-
 import pandas as pd
 import re
 from pathlib import Path
@@ -79,8 +78,8 @@ def load_and_preprocess_data(session_number):
     # Clean column names
     combined_df.columns = combined_df.columns.str.strip()
     
-    # Remove columns with all NaN values
-    combined_df = combined_df.dropna(axis=1, how="all")
+    # Keep all columns, even those with all NaN values
+    # combined_df = combined_df.dropna(axis=1, how="all")
     
     # Sort by StartDate if it exists
     if "StartDate" in combined_df.columns:
@@ -374,6 +373,72 @@ def process_area(df):
     
     return df, area_columns
 
+def fix_participant_26_27_issue(session1_df):
+    """Fix the issue where participant 27 was incorrectly labeled as 26 in session 1"""
+    # Make a copy to avoid modifying the original dataframe
+    df_fixed = session1_df.copy()
+    
+    # Extract participant numbers from participation codes
+    def extract_participant_number(code):
+        if not isinstance(code, str):
+            return None
+        match = re.search(r'[sS](\d+)', code)
+        if match:
+            return int(match.group(1))
+        if code.lower() == 'so9bdb1':
+            return 9
+        return None
+    
+    df_fixed['Participant_Number'] = df_fixed['Participation Code'].apply(extract_participant_number)
+    
+    # Find the two entries for participant 26
+    participant_26_entries = df_fixed[df_fixed['Participant_Number'] == 26]
+    
+    print(f"Found {len(participant_26_entries)} entries for participant 26 in session 1")
+    
+    # If there are two entries, the female one (Gender_y=2.0) should be participant 27
+    if len(participant_26_entries) == 2:
+        # Find the female participant 26 (the one that should be 27)
+        female_26 = participant_26_entries[participant_26_entries['Gender_y'] == 2.0]
+        
+        if len(female_26) == 1:
+            # Get the index of the female participant 26
+            female_26_index = female_26.index[0]
+            
+            # Change the participation code to s27pdb1
+            original_code = df_fixed.loc[female_26_index, 'Participation Code']
+            df_fixed.loc[female_26_index, 'Participation Code'] = 's27pdb1'
+            
+            print(f"Renamed participant from {original_code} to s27pdb1 (female participant in session 1)")
+        else:
+            print(f"Warning: Expected 1 female participant 26, found {len(female_26)}")
+    else:
+        print(f"Warning: Expected 2 entries for participant 26, found {len(participant_26_entries)}")
+    
+    # Remove the temporary column
+    df_fixed = df_fixed.drop(columns=['Participant_Number'])
+    
+    return df_fixed
+
+def convert_gender_codes(df):
+    """Convert gender codes from numeric to text labels"""
+    # Make a copy to avoid modifying the original dataframe
+    df_fixed = df.copy()
+    
+    # Create a mapping for gender codes
+    gender_mapping = {
+        1.0: 'male',
+        2.0: 'female',
+        3.0: 'non-binary'  # In case there are other gender codes
+    }
+    
+    # Convert gender codes
+    if 'Gender' in df_fixed.columns:
+        df_fixed['Gender'] = df_fixed['Gender'].map(lambda x: gender_mapping.get(x, x))
+        print("Converted gender codes to text labels")
+    
+    return df_fixed
+
 def create_summary_file(session1_df, session2_df):
     """Create a summary file with key metrics from both sessions"""
     # Define the columns to include in the summary file
@@ -418,6 +483,10 @@ def process_data():
     print("Processing Session 1 data...")
     session1_df = load_and_preprocess_data(1)
     
+    # Fix the participant 26/27 issue in session 1
+    print("Fixing participant 26/27 issue...")
+    session1_df = fix_participant_26_27_issue(session1_df)
+    
     # Process STAI-State for Session 1
     session1_df, _ = process_stai_state(session1_df, 1)
     
@@ -454,6 +523,12 @@ def process_data():
     # Create summary file
     print("Creating summary file...")
     summary_df = create_summary_file(session1_df, session2_df)
+    
+    # Convert gender codes to text labels
+    print("Converting gender codes to text labels...")
+    summary_df = convert_gender_codes(summary_df)
+    
+    # Save the summary file
     summary_df.to_csv(f"output/{OUTPUT_SUMMARY}", index=False)
     print(f"Summary data saved to output/{OUTPUT_SUMMARY}")
     
@@ -461,11 +536,3 @@ def process_data():
 
 if __name__ == "__main__":
     process_data()
-
-
-### To do ###
-
-# # participants missing session 2 surveys: 13, 15, 16, 25 (doesn't necesarily matter, might just have to pull STAI-S and PANAS from that session)
-# # have to organize/ clean participant id so that imperfectly input responseid colums, so far 5, 6, 8, 19, 29
-# # Looks like there's something wrong with how s26, s27 were input (the second s26 might be the real s27, s27 missing values in a weird way)
-# # Get git hub to work, when I commit, it commits to my repository, but my code is also on the lab repository through different branching? 
